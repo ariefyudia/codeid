@@ -1,0 +1,23 @@
+version: "3.8"
+services:
+  codeid:
+    build: "./"
+    container_name: codeid
+    ports:
+      - "3000:3000"
+    volumes:
+      - "/app/node_modules"
+    networks:
+      - mynetwork
+    depends_on:
+      - redis
+  redis:
+    container_name: redis-service
+    image: "redis:latest"
+    restart: always
+    command: redis-server --save
+    networks:
+      - mynetwork
+networks:
+  mynetwork:
+    driver: bridge
