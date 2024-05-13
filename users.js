@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const url = require("url");
 const axios = require("axios");
 const mongoose = require("mongoose");
+const redis = require("redis");
 const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
@@ -14,6 +15,10 @@ app.use(bodyParser.json());
 //support parsing of application/x-www-form-urlencoded post data
 app.use(bodyParser.urlencoded({ extended: true }));
 
+const client = redis.createClient({
+  host: process.env.REDIS_HOST,
+  port: process.env.REDIS_PORT,
+});
 const uri = process.env.MONGODB_CONNECTION;
 var User;
 async function connectionMongoose() {
@@ -30,6 +35,7 @@ async function initialLoad() {
 
 initialLoad();
 
+// Get Token JWT
 app.get("/", (req, res) => {
   let token;
   try {
@@ -54,6 +60,7 @@ app.get("/", (req, res) => {
   });
 });
 
+// Create User
 app.post("/users", async (req, res, next) => {
   if (req.headers.authorization === undefined) {
     return res.status(401).json({
@@ -70,7 +77,20 @@ app.post("/users", async (req, res, next) => {
     });
   }
   //Decoding the token
-  const decodedToken = jwt.verify(token, "secretkeyappearshere");
+  var dateNow = new Date();
+  // const decodedToken = jwt.verify(token, "secretkeyappearshere");
+  const decodedToken = jwt.verify(
+    token,
+    "secretkeyappearshere",
+    function (err, decoded) {
+      if (err) {
+        return res.status(401).json({
+          success: false,
+          message: "Token expired",
+        });
+      }
+    }
+  );
   if (
     !req.body.userName &&
     !req.body.emailAddress &&
@@ -90,6 +110,14 @@ app.post("/users", async (req, res, next) => {
   await user
     .save()
     .then((data) => {
+      client.connect();
+      client.set(
+        ["st-" + user.id, JSON.stringify(user.toJSON())],
+        (err, reply) => {
+          if (err) throw err;
+          console.log(reply);
+        }
+      );
       res.send({
         message: "User created successfully!!",
         user: data,
@@ -102,6 +130,7 @@ app.post("/users", async (req, res, next) => {
     });
 });
 
+// Get User
 app.get("/users", async (req, res, next) => {
   if (req.headers.authorization === undefined) {
     return res.status(401).json({
@@ -117,14 +146,18 @@ app.get("/users", async (req, res, next) => {
       message: "Error!Token was not provided.",
     });
   }
-  const getAccountNumber = { accountNumber: req.query.keyword };
-  const getIdentityNumber = { identityNumber: req.query.keyword };
-  const data = await User.find({
-    $or: [
-      { accountNumber: req.query.keyword },
-      { identityNumber: req.query.keyword },
-    ],
-  });
+  let data = User;
+
+  if (req.query.keyword !== undefined) {
+    data = await User.find({
+      $or: [
+        { accountNumber: req.query.keyword },
+        { identityNumber: req.query.keyword },
+      ],
+    });
+  } else {
+    data = await User.find();
+  }
   console.log(data.length);
   if (data.length > 0) {
     let result = [];
