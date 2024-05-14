@@ -15,10 +15,7 @@ app.use(bodyParser.json());
 //support parsing of application/x-www-form-urlencoded post data
 app.use(bodyParser.urlencoded({ extended: true }));
 
-const client = redis.createClient({
-  host: process.env.REDIS_HOST,
-  port: process.env.REDIS_PORT,
-});
+const client = redis.createClient();
 const uri = process.env.MONGODB_CONNECTION;
 var User;
 async function connectionMongoose() {
@@ -31,6 +28,12 @@ async function connectionMongoose() {
 
 async function initialLoad() {
   await connectionMongoose();
+
+  client.connect();
+
+  client.on("connect", () => {
+    console.log("connected");
+  });
 }
 
 initialLoad();
@@ -78,7 +81,7 @@ app.post("/users", async (req, res, next) => {
   }
   //Decoding the token
   var dateNow = new Date();
-  // const decodedToken = jwt.verify(token, "secretkeyappearshere");
+
   const decodedToken = jwt.verify(
     token,
     "secretkeyappearshere",
@@ -109,22 +112,19 @@ app.post("/users", async (req, res, next) => {
 
   await user
     .save()
-    .then((data) => {
-      client.connect();
-      client.set(
-        ["st-" + user.id, JSON.stringify(user.toJSON())],
-        (err, reply) => {
-          if (err) throw err;
-          console.log(reply);
-        }
-      );
-      res.send({
+    .then(async (data) => {
+      // Set Cache Redis
+      client.set(user.id, JSON.stringify(user.toJSON()), (err, reply) => {
+        if (err) throw err;
+        console.log(reply);
+      });
+      return res.send({
         message: "User created successfully!!",
         user: data,
       });
     })
     .catch((err) => {
-      res.status(500).send({
+      return res.status(500).send({
         message: err.message || "Some error occurred while creating user",
       });
     });
@@ -146,6 +146,21 @@ app.get("/users", async (req, res, next) => {
       message: "Error!Token was not provided.",
     });
   }
+  //Decoding the token
+  var dateNow = new Date();
+
+  const decodedToken = jwt.verify(
+    token,
+    "secretkeyappearshere",
+    function (err, decoded) {
+      if (err) {
+        return res.status(401).json({
+          success: false,
+          message: "Token expired",
+        });
+      }
+    }
+  );
   let data = User;
 
   if (req.query.keyword !== undefined) {
@@ -183,6 +198,62 @@ app.get("/users", async (req, res, next) => {
     status: true,
     message: "Data not found",
   });
+});
+
+// Destroy User
+app.delete("/users/:id", async (req, res, next) => {
+  if (req.headers.authorization === undefined) {
+    return res.status(401).json({
+      success: false,
+      message: "Unauthorized",
+    });
+  }
+  const token = req.headers.authorization.split(" ")[1];
+  //Authorization: 'Bearer TOKEN'
+  if (!token) {
+    res.status(401).json({
+      success: false,
+      message: "Error!Token was not provided.",
+    });
+  }
+  //Decoding the token
+  var dateNow = new Date();
+
+  const decodedToken = jwt.verify(
+    token,
+    "secretkeyappearshere",
+    function (err, decoded) {
+      if (err) {
+        return res.status(401).json({
+          success: false,
+          message: "Token expired",
+        });
+      }
+    }
+  );
+
+  await User.deleteOne({
+    id: req.params.id,
+  })
+    .then((data) => {
+      if (!data) {
+        return res.status(404).json({
+          status: true,
+          message: "User not found",
+        });
+      } else {
+        return res.status(200).json({
+          status: true,
+          message: "User deleted succesfully!",
+        });
+      }
+    })
+    .catch((err) => {
+      return res.status(500).send({
+        status: false,
+        message: err.message,
+      });
+    });
 });
 
 app.listen(3000, () => {

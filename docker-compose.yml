@@ -12,7 +12,7 @@ services:
     depends_on:
       - redis
   redis:
-    container_name: redis-service
+    container_name: redis
     image: "redis:latest"
     restart: always
     command: redis-server --save
